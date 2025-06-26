@@ -6,12 +6,16 @@ import {
   UseGuards,
   Query,
   ParseIntPipe,
+  ValidationPipe,
 } from '@nestjs/common';
 import { FibonacciService } from './fibonacci.service';
 import { CalculateFibonacciDto } from './dto/calculate-fibonacci.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { User } from '../users/entities/user.entity';
+import { PaginationDto } from 'src/common/dto/pageination.dto';
+import { PaginatedResponseDto } from 'src/common/dto/paginated-response.dto';
+import { FibonacciCalculation } from './entities/fibonacci-calculation.entity';
 
 @Controller('fibonacci')
 @UseGuards(JwtAuthGuard)
@@ -29,14 +33,45 @@ export class FibonacciController {
   @Get('history')
   async getHistory(
     @CurrentUser() user: User,
-    @Query('page', new ParseIntPipe({ optional: true })) page: number = 1,
-    @Query('limit', new ParseIntPipe({ optional: true })) limit: number = 10,
-  ) {
-    return this.fibonacciService.getUserCalculations(user.id, page, limit);
+    @Query(new ValidationPipe({ transform: true }))
+    paginationDto: PaginationDto,
+  ): Promise<PaginatedResponseDto<FibonacciCalculation>> {
+    const result = await this.fibonacciService.getAllUserCalculations(
+      user.id,
+      paginationDto.page,
+      paginationDto.limit,
+    );
+
+    return new PaginatedResponseDto(
+      result.calculations,
+      result.page,
+      result.limit,
+      result.total,
+    );
   }
 
   @Get('stats')
   async getStats(@CurrentUser() user: User) {
     return this.fibonacciService.getCalculationStats(user.id);
+  }
+
+  @Get('all')
+  async getAllCalculations(
+    @CurrentUser() user: User,
+    @Query(new ValidationPipe({ transform: true }))
+    paginationDto: PaginationDto,
+  ): Promise<PaginatedResponseDto<FibonacciCalculation>> {
+    const result = await this.fibonacciService.getAllUserCalculations(
+      user.id,
+      paginationDto.page,
+      paginationDto.limit,
+    );
+
+    return new PaginatedResponseDto(
+      result.calculations,
+      result.page,
+      result.limit,
+      result.total,
+    );
   }
 }

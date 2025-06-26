@@ -1,19 +1,18 @@
-export interface PaginationMeta {
+export interface IPaginationOptions {
+  page: number;
+  limit: number;
+}
+
+export interface IPaginationMeta {
   page: number;
   limit: number;
   total: number;
   totalPages: number;
-  hasNextPage: boolean;
-  hasPreviousPage: boolean;
+  hasNext: boolean;
+  hasPrevious: boolean;
 }
 
-export interface PaginatedResult<T> {
+export interface IPaginatedResult<T> {
   data: T[];
-  meta: PaginationMeta;
-  links?: {
-    first?: string;
-    previous?: string;
-    next?: string;
-    last?: string;
-  };
+  meta: IPaginationMeta;
 }

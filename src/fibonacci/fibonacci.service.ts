@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { FibonacciCalculation } from './entities/fibonacci-calculation.entity';
 import { RedisService } from '../redis/redis.service';
 import { User } from '../users/entities/user.entity';
+import { IPaginatedResult } from '../common/interfaces/pagination.interface';
 
 @Injectable()
 export class FibonacciService {
@@ -21,6 +22,7 @@ export class FibonacciService {
       throw new BadRequestException('Index must be between 0 and 1000');
     }
 
+    // Check Redis cache first
     const cacheKey = `fib:${index}`;
     const cachedResult = await this.redisService.get(cacheKey);
 
@@ -31,10 +33,11 @@ export class FibonacciService {
       result = cachedResult;
       fromCache = true;
     } else {
+      // Calculate fibonacci
       result = this.calculateFibonacciValue(index);
 
-      // Cache the result in Redis (TTL: 1 hour)
-      await this.redisService.set(cacheKey, result, 3600);
+      // Cache the result in Redis (no TTL = permanent cache)
+      await this.redisService.set(cacheKey, result);
     }
 
     // Save to database for user history
@@ -46,6 +49,7 @@ export class FibonacciService {
       });
       await this.fibonacciRepository.save(calculation);
     } catch (error) {
+      // If duplicate, ignore the error (user already calculated this index)
       console.log(
         `Duplicate calculation ignored for user ${user.id}, index ${index}`,
       );
@@ -62,8 +66,14 @@ export class FibonacciService {
     calculations: FibonacciCalculation[];
     total: number;
     page: number;
+    limit: number;
     totalPages: number;
   }> {
+    // Validate pagination parameters
+    if (page < 1) page = 1;
+    if (limit < 1) limit = 10;
+    if (limit > 100) limit = 100; // Max limit for performance
+
     const skip = (page - 1) * limit;
 
     const [calculations, total] = await this.fibonacciRepository.findAndCount({
@@ -77,6 +87,41 @@ export class FibonacciService {
       calculations,
       total,
       page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  async getAllUserCalculations(
+    userId: number,
+    page: number = 1,
+    limit: number = 10,
+  ): Promise<{
+    calculations: FibonacciCalculation[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  }> {
+    // Validate pagination parameters
+    if (page < 1) page = 1;
+    if (limit < 1) limit = 10;
+    if (limit > 100) limit = 100;
+
+    const skip = (page - 1) * limit;
+
+    const [calculations, total] = await this.fibonacciRepository.findAndCount({
+      where: { userId },
+      order: { index: 'ASC' }, // Order by fibonacci index
+      skip,
+      take: limit,
+    });
+
+    return {
+      calculations,
+      total,
+      page,
+      limit,
       totalPages: Math.ceil(total / limit),
     };
   }
@@ -84,6 +129,7 @@ export class FibonacciService {
   private calculateFibonacciValue(n: number): string {
     if (n <= 1) return n.toString();
 
+    // Use BigInt for large numbers
     let a = 0n;
     let b = 1n;
 
@@ -96,10 +142,13 @@ export class FibonacciService {
     return b.toString();
   }
 
+  // Method for getting calculation statistics
   async getCalculationStats(userId: number): Promise<{
     totalCalculations: number;
     uniqueIndices: number;
     lastCalculation: Date | null;
+    averageCalculationTime?: number;
+    mostCalculatedIndex?: number;
   }> {
     const calculations = await this.fibonacciRepository.find({
       where: { userId },
@@ -108,10 +157,69 @@ export class FibonacciService {
 
     const uniqueIndices = new Set(calculations.map((calc) => calc.index)).size;
 
+    // Find most calculated index
+    const indexCount = calculations.reduce(
+      (acc, calc) => {
+        acc[calc.index] = (acc[calc.index] || 0) + 1;
+        return acc;
+      },
+      {} as Record<number, number>,
+    );
+
+    const mostCalculatedIndex =
+      Object.keys(indexCount).length > 0
+        ? parseInt(
+            Object.keys(indexCount).reduce((a, b) =>
+              indexCount[parseInt(a)] > indexCount[parseInt(b)] ? a : b,
+            ),
+          )
+        : undefined;
+
     return {
       totalCalculations: calculations.length,
       uniqueIndices,
       lastCalculation: calculations.length ? calculations[0].createdAt : null,
+      mostCalculatedIndex,
+    };
+  }
+
+  // Search calculations by index range
+  async searchCalculationsByRange(
+    userId: number,
+    minIndex: number,
+    maxIndex: number,
+    page: number = 1,
+    limit: number = 10,
+  ): Promise<{
+    calculations: FibonacciCalculation[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  }> {
+    if (page < 1) page = 1;
+    if (limit < 1) limit = 10;
+    if (limit > 100) limit = 100;
+
+    const skip = (page - 1) * limit;
+
+    const queryBuilder = this.fibonacciRepository
+      .createQueryBuilder('calc')
+      .where('calc.userId = :userId', { userId })
+      .andWhere('calc.index >= :minIndex', { minIndex })
+      .andWhere('calc.index <= :maxIndex', { maxIndex })
+      .orderBy('calc.index', 'ASC')
+      .skip(skip)
+      .take(limit);
+
+    const [calculations, total] = await queryBuilder.getManyAndCount();
+
+    return {
+      calculations,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
     };
   }
 }
