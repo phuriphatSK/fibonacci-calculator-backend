@@ -20,7 +20,7 @@ export class AuthController {
     const result = await this.authService.login(req.user as any);
 
     // Redirect to frontend with token
-    const frontendUrl = process.env.CORS_ORIGIN || 'http://localhost:5173';
+    const frontendUrl = process.env.CORS_ORIGIN || 'http://localhost:3000';
     const redirectUrl = `${frontendUrl}/fibonacci?token=${result.access_token}&user=${encodeURIComponent(JSON.stringify(result.user))}`;
 
     res.redirect(redirectUrl);
